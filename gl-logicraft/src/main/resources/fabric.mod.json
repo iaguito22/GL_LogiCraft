@@ -1,0 +1,37 @@
+{
+	"schemaVersion": 1,
+	"id": "gllogicraft",
+	"version": "${version}",
+	"name": "GL_LogiCraft",
+	"description": "Compact programmable logic blocks for Minecraft",
+	"authors": [
+		"GL"
+	],
+	"contact": {
+		"homepage": "",
+		"sources": ""
+	},
+	"license": "MIT",
+	"icon": "assets/gllogicraft/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"com.gl.logicraft.GLLogiCraft"
+		],
+		"client": [
+			"com.gl.logicraft.GLLogiCraftClient"
+		]
+	},
+	"mixins": [
+		"gllogicraft.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=${loader_version}",
+		"minecraft": "~${minecraft_version}",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
