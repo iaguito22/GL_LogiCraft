@@ -1,8 +1,0 @@
-{
-	"modmenu.description.gllogicraft": "Compact programmable logic blocks for Minecraft",
-	"itemGroup.gllogicraft.group": "GL LogiCraft",
-	"block.gllogicraft.logic_block": "Logic Block",
-	"block.gllogicraft.logic_chip": "Logic Chip",
-	"item.gllogicraft.wrench": "Logic Wrench",
-	"container.gllogicraft.logic_screen": "Logic Chip Editor"
-}
