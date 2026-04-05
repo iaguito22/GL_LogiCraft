@@ -1,0 +1,10 @@
+# Ignorar carpetas pesadas de Gradle
+gllogicraft/.gradle/
+gllogicraft/build/
+
+# Ignorar archivos del IDE
+gllogicraft/.idea/
+gllogicraft/*.iml
+
+# Ignorar la carpeta de ejecución de Minecraft
+gllogicraft/run/
