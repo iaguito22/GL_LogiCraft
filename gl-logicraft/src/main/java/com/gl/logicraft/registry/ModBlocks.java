@@ -33,7 +33,8 @@ public class ModBlocks {
                             .mapColor(MapColor.CLEAR)
                             .noCollision()
                             .nonOpaque()
-                            .strength(0.2f)
+                            .hardness(1.0f)
+                            .resistance(1.0f)
                             .pistonBehavior(net.minecraft.block.piston.PistonBehavior.DESTROY)
             )
     );

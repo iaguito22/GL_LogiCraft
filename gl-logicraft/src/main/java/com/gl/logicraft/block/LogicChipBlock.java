@@ -3,6 +3,7 @@ package com.gl.logicraft.block;
 import com.gl.logicraft.GLLogiCraft;
 import com.gl.logicraft.blockentity.LogicChipBlockEntity;
 import com.gl.logicraft.registry.ModBlockEntities;
+import com.gl.logicraft.registry.ModItems;
 import net.minecraft.block.*;
 import net.minecraft.block.entity.BlockEntity;
 import net.minecraft.block.entity.BlockEntityTicker;
@@ -109,6 +110,14 @@ public class LogicChipBlock extends BlockWithEntity {
     // -----------------------------------------------------------------------
     // Hitbox
     // -----------------------------------------------------------------------
+
+    @Override
+    public float calcBlockBreakingDelta(BlockState state, PlayerEntity player, BlockView world, BlockPos pos) {
+        if (player.getMainHandStack().isOf(ModItems.WRENCH)) {
+            return 1.0f; // instant with wrench
+        }
+        return 0.0f; // unbreakable without wrench
+    }
 
     @Override
     public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {

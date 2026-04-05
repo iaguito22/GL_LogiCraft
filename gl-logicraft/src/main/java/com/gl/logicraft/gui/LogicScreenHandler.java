@@ -34,6 +34,7 @@ public class LogicScreenHandler extends ScreenHandler {
     // Circuit data held client-side for rendering in LogicScreen
     private final List<GuiComponent> guiComponents = new ArrayList<>();
     private final List<Wire>         wires         = new ArrayList<>();
+    public final boolean[]           startingInputs = new boolean[5];
 
     // -----------------------------------------------------------------------
     // Server-side constructor (called by WrenchItem.useOnBlock createMenu)
@@ -65,7 +66,14 @@ public class LogicScreenHandler extends ScreenHandler {
             for (int i = 0; i < wList.size(); i++) {
                 wires.add(Wire.fromNbt(wList.getCompound(i)));
             }
+            if (gui.contains("CircuitInputs")) {
+                byte[] ins = gui.getByteArray("CircuitInputs");
+                for (int i = 0; i < ins.length && i < startingInputs.length; i++) {
+                    startingInputs[i] = (ins[i] != 0);
+                }
+            }
         }
+
     }
 
     // -----------------------------------------------------------------------

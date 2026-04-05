@@ -18,6 +18,7 @@ public class Wire {
     public final String toId;    // target component/node ID
     public final int    toPort;  // input port index on the target
     public final int    bitWidth; // reserved for future multi-bit wires (always 1)
+    public boolean      signal = false; // explicitly added for state rendering
 
     public Wire(String fromId, int fromPort, String toId, int toPort) {
         this(fromId, fromPort, toId, toPort, 1);

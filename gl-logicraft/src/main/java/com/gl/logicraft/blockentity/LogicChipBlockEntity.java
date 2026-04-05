@@ -180,6 +180,10 @@ public class LogicChipBlockEntity extends BlockEntity {
         for (Wire w : wires) wList.add(w.toNbt());
         nbt.put("Wires", wList);
 
+        byte[] ins = new byte[CircuitState.SIGNAL_COUNT];
+        for (int i = 0; i < CircuitState.SIGNAL_COUNT; i++) ins[i] = (byte)(circuitState.inputs[i] ? 1 : 0);
+        nbt.putByteArray("CircuitInputs", ins);
+
         return nbt;
     }
 
