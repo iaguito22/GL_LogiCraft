@@ -1,10 +1,27 @@
 {
   "variants": {
-    "facing=down":  { "model": "gllogicraft:block/logic_chip" },
-    "facing=up":    { "model": "gllogicraft:block/logic_chip" },
-    "facing=north": { "model": "gllogicraft:block/logic_chip" },
-    "facing=south": { "model": "gllogicraft:block/logic_chip" },
-    "facing=west":  { "model": "gllogicraft:block/logic_chip" },
-    "facing=east":  { "model": "gllogicraft:block/logic_chip" }
+    "facing=down": {
+      "model": "gllogicraft:block/logic_chip",
+      "x": 90
+    },
+    "facing=up": {
+      "model": "gllogicraft:block/logic_chip",
+      "x": 270
+    },
+    "facing=north": {
+      "model": "gllogicraft:block/logic_chip"
+    },
+    "facing=south": {
+      "model": "gllogicraft:block/logic_chip",
+      "y": 180
+    },
+    "facing=west": {
+      "model": "gllogicraft:block/logic_chip",
+      "y": 270
+    },
+    "facing=east": {
+      "model": "gllogicraft:block/logic_chip",
+      "y": 90
+    }
   }
 }

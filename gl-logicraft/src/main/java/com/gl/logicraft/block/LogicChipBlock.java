@@ -36,9 +36,9 @@ import java.util.Map;
  *
  * Placement rules:
  *  - Can be placed on any face of any block.
- *  - FACING = the direction from the chip toward its host block.
- *    (e.g., placed on top of a block → FACING = DOWN, host is below.)
- *  - Has a 0.125-thick hitbox that hugs the face it's attached to.
+ *  - FACING = the direction from the host block toward the chip.
+ *    (e.g., placed on top of a block → FACING = UP, host is below.)
+ *  - Has a 1-pixel-thick hitbox that hugs the face it's attached to.
  *
  * Redstone:
  *  - Reads host block's incoming redstone → CircuitState.inputs[0].
@@ -65,17 +65,9 @@ public class LogicChipBlock extends BlockWithEntity {
     // Hitbox shapes (0.125 thick, full on the other two axes)
     // -----------------------------------------------------------------------
 
-    private static final Map<Direction, VoxelShape> SHAPES = new EnumMap<>(Direction.class);
+    // Shapes are 1 pixel thick (0 to 1 / 15 to 16)
+    // We don't need the static map anymore if we use the switch in getOutlineShape.
 
-    static {
-        double t = 0.125;
-        SHAPES.put(Direction.DOWN,  VoxelShapes.cuboid(0, 0,     0, 1, t,     1));
-        SHAPES.put(Direction.UP,    VoxelShapes.cuboid(0, 1 - t, 0, 1, 1,     1));
-        SHAPES.put(Direction.NORTH, VoxelShapes.cuboid(0, 0,     1 - t, 1, 1, 1));
-        SHAPES.put(Direction.SOUTH, VoxelShapes.cuboid(0, 0,     0,     1, 1, t));
-        SHAPES.put(Direction.WEST,  VoxelShapes.cuboid(1 - t, 0, 0, 1, 1,     1));
-        SHAPES.put(Direction.EAST,  VoxelShapes.cuboid(0,     0, 0, t, 1,     1));
-    }
 
     // -----------------------------------------------------------------------
     // Constructor
@@ -102,9 +94,24 @@ public class LogicChipBlock extends BlockWithEntity {
     @Nullable
     @Override
     public BlockState getPlacementState(ItemPlacementContext ctx) {
-        Direction hitFace = ctx.getSide(); // face of the target block that was clicked
-        // FACING points from chip toward host → opposite of hit face
-        return getDefaultState().with(FACING, hitFace.getOpposite());
+        return getDefaultState().with(FACING, ctx.getSide());
+    }
+
+    @Override
+    public void onBlockAdded(BlockState state, World world, BlockPos pos, BlockState oldState, boolean notify) {
+        if (!world.isClient) {
+            world.scheduleBlockTick(pos, this, 1);
+        }
+    }
+
+    @Override
+    protected void scheduledTick(BlockState state, net.minecraft.server.world.ServerWorld world, BlockPos pos, net.minecraft.util.math.random.Random random) {
+        BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
+        int power = world.getReceivedRedstonePower(hostPos);
+        if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip) {
+            chip.getCircuitState().inputs[0] = power > 0;
+            chip.serverEvaluate();
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -120,8 +127,15 @@ public class LogicChipBlock extends BlockWithEntity {
     }
 
     @Override
-    public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext context) {
-        return SHAPES.get(state.get(FACING));
+    public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
+        return switch (state.get(FACING)) {
+            case DOWN ->  Block.createCuboidShape(0, 15, 0, 16, 16, 16);
+            case UP ->    Block.createCuboidShape(0, 0,  0, 16,  1, 16);
+            case NORTH -> Block.createCuboidShape(0, 0, 15, 16, 16, 16);
+            case SOUTH -> Block.createCuboidShape(0, 0,  0, 16, 16,  1);
+            case EAST ->  Block.createCuboidShape(0, 0,  0,  1, 16, 16);
+            case WEST ->  Block.createCuboidShape(15, 0, 0, 16, 16, 16);
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -147,8 +161,8 @@ public class LogicChipBlock extends BlockWithEntity {
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(
             World world, BlockState state, BlockEntityType<T> type) {
-        // No tick needed; all logic is event-driven
-        return null;
+        if (world.isClient) return null;
+        return validateTicker(type, ModBlockEntities.LOGIC_CHIP_BLOCK_ENTITY, LogicChipBlockEntity::tick);
     }
 
     // -----------------------------------------------------------------------
@@ -161,12 +175,19 @@ public class LogicChipBlock extends BlockWithEntity {
     }
 
     @Override
-    public int getWeakRedstonePower(
+    protected int getStrongRedstonePower(BlockState state, BlockView world, BlockPos pos, Direction direction) {
+        Direction facing = state.get(FACING);
+        // Respond only to the host block querying us (host is in facing.getOpposite() direction)
+        // Host asks from direction 'facing' (pointing from host toward chip)
+        if (direction != facing) return 0;
+        if (!(world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip)) return 0;
+        return chip.getCircuitState().outputs[0] ? 15 : 0;
+    }
+
+    @Override
+    protected int getWeakRedstonePower(
             BlockState state, BlockView world, BlockPos pos, Direction direction) {
-        if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity be) {
-            return be.getCircuitState().writeRedstone();
-        }
-        return 0;
+        return getStrongRedstonePower(state, world, pos, direction);
     }
 
     // -----------------------------------------------------------------------
@@ -181,10 +202,10 @@ public class LogicChipBlock extends BlockWithEntity {
         if (world.isClient()) return;
 
         if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity be) {
-            // The host block sits in the FACING direction from this chip
-            BlockPos hostPos = pos.offset(state.get(FACING));
-            be.getCircuitState().readRedstone(world, hostPos);
-            be.evaluate();
+            BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
+            int power = world.getReceivedRedstonePower(hostPos);
+            be.getCircuitState().inputs[0] = power > 0;
+            be.serverEvaluate();
         }
     }
 

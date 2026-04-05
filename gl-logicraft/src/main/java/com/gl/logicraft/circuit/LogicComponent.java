@@ -24,6 +24,8 @@ public abstract class LogicComponent {
     // Constructor
     // -----------------------------------------------------------------------
 
+    protected LogicComponent() {}
+
     protected LogicComponent(int[] inputSlots, int outputSlot) {
         this.inputSlots = inputSlots;
         this.outputSlot = outputSlot;
@@ -89,6 +91,7 @@ public abstract class LogicComponent {
             case OrGate.TYPE       -> new OrGate(slots, out);
             case NotGate.TYPE      -> new NotGate(slots[0], out);
             case PassThrough.TYPE  -> new PassThrough(slots[0], out);
+            case XorGate.TYPE      -> new XorGate();
             default -> throw new IllegalArgumentException("Unknown LogicComponent type: " + type);
         };
         comp.fromNbt(nbt);
@@ -183,5 +186,24 @@ public abstract class LogicComponent {
         public boolean evaluate(boolean[] inputs) {
             return inputs[inputSlots[0]];
         }
+    }
+
+    // ── XOR ──────────────────────────────────────────────────────────────────
+
+    /**
+     * XOR gate — true only when exactly one input is true (for 2 inputs).
+     */
+    public static class XorGate extends LogicComponent {
+        public static final String TYPE = "XOR";
+        public XorGate() {
+            this.inputSlots = new int[]{0, 1};
+            this.outputSlot = 0;
+        }
+        @Override
+        public boolean evaluate(boolean[] inputs) {
+            return inputs[0] ^ inputs[1];
+        }
+        @Override
+        public String getType() { return TYPE; }
     }
 }

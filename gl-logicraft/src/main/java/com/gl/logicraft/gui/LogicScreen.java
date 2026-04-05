@@ -53,6 +53,7 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
             {"OR",   "or"},
             {"NOT",  "not"},
             {"PASS", "pass"},
+            {"XOR",  "XOR"},
     };
 
     // Fixed node IDs
@@ -111,7 +112,7 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
     private int getComponentHeight(String type) {
         if (type == null) return 1;
         return switch (type.toLowerCase()) {
-            case "and", "or" -> 2;
+            case "and", "or", "xor" -> 2;
             default -> 1;
         };
     }
@@ -191,6 +192,7 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         return switch (type.toLowerCase()) {
             case "and"  -> { boolean r = true;  for (boolean b : inputs) r &= b; yield r; }
             case "or"   -> { boolean r = false; for (boolean b : inputs) r |= b; yield r; }
+            case "xor"  -> inputs.length >= 2 && (inputs[0] ^ inputs[1]);
             case "not"  -> inputs.length > 0 && !inputs[0];
             default     -> inputs.length > 0 && inputs[0]; // pass
         };

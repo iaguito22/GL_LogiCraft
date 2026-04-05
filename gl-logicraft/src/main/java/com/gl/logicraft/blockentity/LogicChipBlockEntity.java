@@ -13,6 +13,7 @@ import net.minecraft.nbt.NbtElement;
 import net.minecraft.nbt.NbtList;
 import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
 
 import java.util.*;
@@ -46,6 +47,8 @@ public class LogicChipBlockEntity extends BlockEntity {
     private final List<LogicComponent> components = new ArrayList<>();
 
     boolean isPropagating = false;
+    private boolean lastOutput = false;
+    private boolean lastInputRedstone = false;
 
     // -----------------------------------------------------------------------
     // Constructor
@@ -73,7 +76,7 @@ public class LogicChipBlockEntity extends BlockEntity {
      * Input node signals → gate evaluations → output node signals.
      * If any circuit output changed, propagates to the world and neighbours.
      */
-    public void evaluate() {
+    public void serverEvaluate() {
         if (world == null) return;
 
         boolean[] outputsBefore = Arrays.copyOf(circuitState.outputs, CircuitState.SIGNAL_COUNT);
@@ -114,8 +117,19 @@ public class LogicChipBlockEntity extends BlockEntity {
 
         // ------ Propagate if changed ------
         boolean changed = !Arrays.equals(outputsBefore, circuitState.outputs);
+
+        boolean currentOut = circuitState.outputs[0];
+        if (currentOut != lastOutput) {
+            lastOutput = currentOut;
+            if (world instanceof net.minecraft.server.world.ServerWorld sw) {
+                sw.updateNeighborsAlways(pos, getCachedState().getBlock());
+                Direction facing = getCachedState().get(com.gl.logicraft.block.LogicChipBlock.FACING);
+                BlockPos hostPos = pos.offset(facing.getOpposite());
+                sw.updateNeighborsAlways(hostPos, sw.getBlockState(hostPos).getBlock());
+            }
+        }
+
         if (changed) {
-            world.updateNeighbors(pos, getCachedState().getBlock());
             isPropagating = true;
             try {
                 SignalPropagator.propagate(world, pos, circuitState.outputs);
@@ -130,6 +144,7 @@ public class LogicChipBlockEntity extends BlockEntity {
         return switch (type) {
             case "and"  -> { boolean r = true;  for (boolean b : inputs) r &= b; yield r; }
             case "or"   -> { boolean r = false; for (boolean b : inputs) r |= b; yield r; }
+            case "xor"  -> inputs.length >= 2 && (inputs[0] ^ inputs[1]);
             case "not"  -> inputs.length > 0 && !inputs[0];
             default     -> inputs.length > 0 && inputs[0]; // pass
         };
@@ -153,16 +168,32 @@ public class LogicChipBlockEntity extends BlockEntity {
     // -----------------------------------------------------------------------
 
     public void receiveSignals(boolean[] signals) {
-        if (isPropagating) return;
+        if (isPropagating || world == null || world.isClient()) return;
+
+        // Re-calculate inputs 1-4 by ORing all neighbors
+        boolean[] nextInputs = new boolean[CircuitState.SIGNAL_COUNT];
+        System.arraycopy(circuitState.inputs, 0, nextInputs, 0, CircuitState.SIGNAL_COUNT);
+
+        // Reset inter-chip inputs before merging
+        for (int i = 1; i < 5; i++) nextInputs[i] = false;
+
+        for (Direction dir : Direction.values()) {
+            if (world.getBlockEntity(pos.offset(dir)) instanceof LogicChipBlockEntity neighbor) {
+                boolean[] nOuts = neighbor.getCircuitState().outputs;
+                for (int i = 1; i < 5; i++) {
+                    nextInputs[i] |= nOuts[i];
+                }
+            }
+        }
+
         boolean changed = false;
-        int len = Math.min(signals.length, CircuitState.SIGNAL_COUNT);
-        for (int i = 0; i < len; i++) {
-            if (signals[i] && !circuitState.inputs[i]) {
-                circuitState.inputs[i] = true;
+        for (int i = 1; i < 5; i++) {
+            if (circuitState.inputs[i] != nextInputs[i]) {
+                circuitState.inputs[i] = nextInputs[i];
                 changed = true;
             }
         }
-        if (changed) evaluate();
+        if (changed) serverEvaluate();
     }
 
     // -----------------------------------------------------------------------
@@ -221,6 +252,22 @@ public class LogicChipBlockEntity extends BlockEntity {
         }
         if (nbt.contains("GuiData")) {
             deserializeGuiData(nbt.getCompound("GuiData"));
+        }
+    }
+
+    public static void tick(World world, BlockPos pos, BlockState state, LogicChipBlockEntity be) {
+        if (world.isClient) return;
+
+        // Poll host block redstone every tick to catch removals neighborUpdate might miss
+        Direction facing = state.get(com.gl.logicraft.block.LogicChipBlock.FACING);
+        BlockPos hostPos = pos.offset(facing.getOpposite());
+        int power = world.getReceivedRedstonePower(hostPos);
+        boolean currentInput = power > 0;
+
+        if (currentInput != be.lastInputRedstone) {
+            be.lastInputRedstone = currentInput;
+            be.getCircuitState().inputs[0] = currentInput;
+            be.serverEvaluate();
         }
     }
 }

@@ -112,7 +112,7 @@ public class LogicScreenHandler extends ScreenHandler {
         if (!(sw.getBlockEntity(payload.pos()) instanceof LogicChipBlockEntity chip)) return;
 
         chip.deserializeGuiData(payload.circuit());
-        chip.evaluate();
+        chip.serverEvaluate();
     }
 
     // -----------------------------------------------------------------------
