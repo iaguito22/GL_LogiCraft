@@ -90,6 +90,14 @@ public class LogicChipBlockEntity extends BlockEntity {
             sigs.put("IN_" + i, new boolean[]{circuitState.inputs[i + 1]});
         }
 
+        // Seed constants first
+        for (GuiComponent gc : guiComponents) {
+            if ("1".equals(gc.type) || "0".equals(gc.type)) {
+                boolean val = evalGate(gc.type, new boolean[0]);
+                sigs.put(gc.id, new boolean[]{val});
+            }
+        }
+
         // Settle signals with up to (size+1) passes (handles any topological order)
         int passes = guiComponents.size() + 1;
         for (int p = 0; p < passes; p++) {
@@ -141,11 +149,13 @@ public class LogicChipBlockEntity extends BlockEntity {
     }
 
     private boolean evalGate(String type, boolean[] inputs) {
-        return switch (type) {
+        return switch (type.toLowerCase()) {
             case "and"  -> { boolean r = true;  for (boolean b : inputs) r &= b; yield r; }
             case "or"   -> { boolean r = false; for (boolean b : inputs) r |= b; yield r; }
             case "xor"  -> inputs.length >= 2 && (inputs[0] ^ inputs[1]);
             case "not"  -> inputs.length > 0 && !inputs[0];
+            case "1"    -> true;
+            case "0"    -> false;
             default     -> inputs.length > 0 && inputs[0]; // pass
         };
     }

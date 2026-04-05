@@ -18,7 +18,8 @@ import net.minecraft.registry.RegistryKeys;
  */
 public class ModBlocks {
 
-    public static final RegistryKey<Block> LOGIC_CHIP_KEY = RegistryKey.of(RegistryKeys.BLOCK, Identifier.of(GLLogiCraft.MOD_ID, "logic_chip"));
+    public static final RegistryKey<Block> LOGIC_CHIP_KEY = RegistryKey.of(RegistryKeys.BLOCK,
+            Identifier.of(GLLogiCraft.MOD_ID, "logic_chip"));
 
     /**
      * Logic Chip — a nearly-invisible attachment block.
@@ -35,9 +36,7 @@ public class ModBlocks {
                             .nonOpaque()
                             .hardness(1.0f)
                             .resistance(1.0f)
-                            .pistonBehavior(net.minecraft.block.piston.PistonBehavior.DESTROY)
-            )
-    );
+                            .pistonBehavior(net.minecraft.block.piston.PistonBehavior.DESTROY)));
 
     // -----------------------------------------------------------------------
 
@@ -45,9 +44,5 @@ public class ModBlocks {
         GLLogiCraft.LOGGER.info("Registering GL_LogiCraft Blocks...");
         // Static fields are initialised when this class is first loaded;
         // calling register() ensures that happens at the right time.
-    }
-
-    private static Block registerBlock(String name, Block block) {
-        return Registry.register(Registries.BLOCK, Identifier.of(GLLogiCraft.MOD_ID, name), block);
     }
 }

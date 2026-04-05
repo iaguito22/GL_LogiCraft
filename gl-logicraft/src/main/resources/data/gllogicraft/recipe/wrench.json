@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "category": "equipment",
+  "pattern": [
+    "EBE",
+    "GNG",
+    "EBE"
+  ],
+  "key": {
+    "E": "minecraft:ender_pearl",
+    "B": "minecraft:blaze_rod",
+    "G": "minecraft:gold_block",
+    "N": "minecraft:netherite_ingot"
+  },
+  "result": {
+    "id": "gllogicraft:wrench",
+    "count": 1
+  }
+}

@@ -92,6 +92,8 @@ public abstract class LogicComponent {
             case NotGate.TYPE      -> new NotGate(slots[0], out);
             case PassThrough.TYPE  -> new PassThrough(slots[0], out);
             case XorGate.TYPE      -> new XorGate();
+            case OneConstant.TYPE  -> new OneConstant();
+            case ZeroConstant.TYPE -> new ZeroConstant();
             default -> throw new IllegalArgumentException("Unknown LogicComponent type: " + type);
         };
         comp.fromNbt(nbt);
@@ -203,6 +205,32 @@ public abstract class LogicComponent {
         public boolean evaluate(boolean[] inputs) {
             return inputs[0] ^ inputs[1];
         }
+        @Override
+        public String getType() { return TYPE; }
+    }
+
+    // ── CONSTANTS ────────────────────────────────────────────────────────────
+
+    public static class OneConstant extends LogicComponent {
+        public static final String TYPE = "1";
+        public OneConstant() {
+            this.inputSlots = new int[]{};
+            this.outputSlot = 0;
+        }
+        @Override
+        public boolean evaluate(boolean[] inputs) { return true; }
+        @Override
+        public String getType() { return TYPE; }
+    }
+
+    public static class ZeroConstant extends LogicComponent {
+        public static final String TYPE = "0";
+        public ZeroConstant() {
+            this.inputSlots = new int[]{};
+            this.outputSlot = 0;
+        }
+        @Override
+        public boolean evaluate(boolean[] inputs) { return false; }
         @Override
         public String getType() { return TYPE; }
     }

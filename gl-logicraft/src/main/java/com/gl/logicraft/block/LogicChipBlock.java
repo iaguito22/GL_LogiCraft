@@ -1,6 +1,5 @@
 package com.gl.logicraft.block;
 
-import com.gl.logicraft.GLLogiCraft;
 import com.gl.logicraft.blockentity.LogicChipBlockEntity;
 import com.gl.logicraft.registry.ModBlockEntities;
 import com.gl.logicraft.registry.ModItems;
@@ -10,42 +9,33 @@ import net.minecraft.block.entity.BlockEntityTicker;
 import net.minecraft.block.entity.BlockEntityType;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemPlacementContext;
-import net.minecraft.item.ItemStack;
-import net.minecraft.registry.tag.TagKey;
-import net.minecraft.item.Item;
-import net.minecraft.registry.RegistryKeys;
 import net.minecraft.state.StateManager;
 import net.minecraft.state.property.EnumProperty;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.ActionResult;
-import net.minecraft.util.Identifier;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.shape.VoxelShape;
-import net.minecraft.util.shape.VoxelShapes;
 import net.minecraft.world.BlockView;
 import net.minecraft.world.World;
 import org.jetbrains.annotations.Nullable;
-
-import java.util.EnumMap;
-import java.util.Map;
 
 /**
  * LogicChipBlock — a nearly-invisible attachment block.
  *
  * Placement rules:
- *  - Can be placed on any face of any block.
- *  - FACING = the direction from the host block toward the chip.
- *    (e.g., placed on top of a block → FACING = UP, host is below.)
- *  - Has a 1-pixel-thick hitbox that hugs the face it's attached to.
+ * - Can be placed on any face of any block.
+ * - FACING = the direction from the host block toward the chip.
+ * (e.g., placed on top of a block → FACING = UP, host is below.)
+ * - Has a 1-pixel-thick hitbox that hugs the face it's attached to.
  *
  * Redstone:
- *  - Reads host block's incoming redstone → CircuitState.inputs[0].
- *  - Emits getWeakRedstonePower from CircuitState.outputs[0].
+ * - Reads host block's incoming redstone → CircuitState.inputs[0].
+ * - Emits getWeakRedstonePower from CircuitState.outputs[0].
  *
  * Interaction:
- *  - Right-click with an item tagged `gllogicraft:wrench` → opens GUI (TODO).
+ *  - Right-click with an item tagged `gllogicraft:wrench` → opens GUI.
  */
 public class LogicChipBlock extends BlockWithEntity {
 
@@ -68,7 +58,6 @@ public class LogicChipBlock extends BlockWithEntity {
     // Shapes are 1 pixel thick (0 to 1 / 15 to 16)
     // We don't need the static map anymore if we use the switch in getOutlineShape.
 
-
     // -----------------------------------------------------------------------
     // Constructor
     // -----------------------------------------------------------------------
@@ -89,7 +78,8 @@ public class LogicChipBlock extends BlockWithEntity {
 
     /**
      * On placement, set FACING = opposite of the side the player clicked.
-     * e.g., player clicks top face (side = UP) → chip placed above host → FACING = DOWN.
+     * e.g., player clicks top face (side = UP) → chip placed above host → FACING =
+     * DOWN.
      */
     @Nullable
     @Override
@@ -105,7 +95,8 @@ public class LogicChipBlock extends BlockWithEntity {
     }
 
     @Override
-    protected void scheduledTick(BlockState state, net.minecraft.server.world.ServerWorld world, BlockPos pos, net.minecraft.util.math.random.Random random) {
+    protected void scheduledTick(BlockState state, net.minecraft.server.world.ServerWorld world, BlockPos pos,
+            net.minecraft.util.math.random.Random random) {
         BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
         int power = world.getReceivedRedstonePower(hostPos);
         if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip) {
@@ -129,12 +120,12 @@ public class LogicChipBlock extends BlockWithEntity {
     @Override
     public VoxelShape getOutlineShape(BlockState state, BlockView world, BlockPos pos, ShapeContext ctx) {
         return switch (state.get(FACING)) {
-            case DOWN ->  Block.createCuboidShape(0, 15, 0, 16, 16, 16);
-            case UP ->    Block.createCuboidShape(0, 0,  0, 16,  1, 16);
+            case DOWN -> Block.createCuboidShape(0, 15, 0, 16, 16, 16);
+            case UP -> Block.createCuboidShape(0, 0, 0, 16, 1, 16);
             case NORTH -> Block.createCuboidShape(0, 0, 15, 16, 16, 16);
-            case SOUTH -> Block.createCuboidShape(0, 0,  0, 16, 16,  1);
-            case EAST ->  Block.createCuboidShape(0, 0,  0,  1, 16, 16);
-            case WEST ->  Block.createCuboidShape(15, 0, 0, 16, 16, 16);
+            case SOUTH -> Block.createCuboidShape(0, 0, 0, 16, 16, 1);
+            case EAST -> Block.createCuboidShape(0, 0, 0, 1, 16, 16);
+            case WEST -> Block.createCuboidShape(15, 0, 0, 16, 16, 16);
         };
     }
 
@@ -161,7 +152,8 @@ public class LogicChipBlock extends BlockWithEntity {
     @Override
     public <T extends BlockEntity> BlockEntityTicker<T> getTicker(
             World world, BlockState state, BlockEntityType<T> type) {
-        if (world.isClient) return null;
+        if (world.isClient)
+            return null;
         return validateTicker(type, ModBlockEntities.LOGIC_CHIP_BLOCK_ENTITY, LogicChipBlockEntity::tick);
     }
 
@@ -177,10 +169,13 @@ public class LogicChipBlock extends BlockWithEntity {
     @Override
     protected int getStrongRedstonePower(BlockState state, BlockView world, BlockPos pos, Direction direction) {
         Direction facing = state.get(FACING);
-        // Respond only to the host block querying us (host is in facing.getOpposite() direction)
+        // Respond only to the host block querying us (host is in facing.getOpposite()
+        // direction)
         // Host asks from direction 'facing' (pointing from host toward chip)
-        if (direction != facing) return 0;
-        if (!(world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip)) return 0;
+        if (direction != facing)
+            return 0;
+        if (!(world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip))
+            return 0;
         return chip.getCircuitState().outputs[0] ? 15 : 0;
     }
 
@@ -199,7 +194,8 @@ public class LogicChipBlock extends BlockWithEntity {
             BlockState state, World world, BlockPos pos,
             Block sourceBlock, @Nullable net.minecraft.world.block.WireOrientation orientation, boolean notify) {
 
-        if (world.isClient()) return;
+        if (world.isClient())
+            return;
 
         if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity be) {
             BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
@@ -217,18 +213,6 @@ public class LogicChipBlock extends BlockWithEntity {
     public ActionResult onUse(
             BlockState state, World world, BlockPos pos,
             PlayerEntity player, BlockHitResult hit) {
-
-        ItemStack held = player.getMainHandStack();
-        TagKey<Item> wrenchTag = TagKey.of(RegistryKeys.ITEM, Identifier.of(GLLogiCraft.MOD_ID, "wrench"));
-        if (held.isIn(wrenchTag)) {
-            if (!world.isClient()) {
-                // TODO: Open the logic programming GUI
-                player.sendMessage(
-                        net.minecraft.text.Text.literal("[GL_LogiCraft] GUI not yet implemented."), true);
-            }
-            return ActionResult.SUCCESS;
-        }
-
         return ActionResult.PASS;
     }
 }

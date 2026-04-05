@@ -1,6 +1,6 @@
 {
   "parent": "minecraft:item/generated",
   "textures": {
-    "layer0": "minecraft:item/logic_chip"
+    "layer0": "gllogicraft:item/logic_chip"
   }
 }
