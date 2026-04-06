@@ -18,3 +18,11 @@ gl-logicraft/out/
 
 # Gradle properties
 gl-logicraft/gradle.properties
+
+# IDEs
+.vscode/*
+.cursor/*
+.agent/*
+.antigravity/*
+.idea/*
+
