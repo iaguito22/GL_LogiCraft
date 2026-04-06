@@ -15,6 +15,9 @@ import net.minecraft.client.render.VertexConsumer;
 import net.minecraft.client.render.VertexRendering;
 import net.minecraft.client.util.math.MatrixStack;
 import net.minecraft.item.ItemStack;
+import net.minecraft.block.entity.BlockEntity;
+import com.gl.logicraft.blockentity.LogicChipBlockEntity;
+import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 import net.minecraft.util.shape.VoxelShape;
@@ -57,6 +60,12 @@ public class GLLogiCraftClient implements ClientModInitializer {
 
                 // Render a colored outline box using the block's outline shape
                 VoxelShape shape = state.getOutlineShape(client.world, pos, ShapeContext.absent());
+                Direction blockedDir = null;
+                BlockEntity be = client.world.getBlockEntity(pos);
+                if (be instanceof LogicChipBlockEntity chip) {
+                    blockedDir = chip.lastSignalOrigin;
+                }
+
                 // Draw outline in color #4a9eff (same blue as palette selection highlight)
                 MatrixStack matrices = context.matrixStack();
                 matrices.push();
@@ -67,10 +76,65 @@ public class GLLogiCraftClient implements ClientModInitializer {
                 VertexRendering.drawOutline(
                     matrices, lineConsumer, shape,
                     0, 0, 0,
-                    0xFF4A9EFF  // ABGR or ARGB? Minecraft usually uses ARGB for standard utilities.
+                    0xFF4A9EFF
                 );
+                
+                if (blockedDir != null) {
+                    net.minecraft.util.math.Box box = shape.getBoundingBox();
+                    int r = 0xCC, g = 0x22, b = 0x00, a = 0xFF;
+                    float minX = (float) box.minX; float minY = (float) box.minY; float minZ = (float) box.minZ;
+                    float maxX = (float) box.maxX; float maxY = (float) box.maxY; float maxZ = (float) box.maxZ;
+                    MatrixStack.Entry entry = matrices.peek();
+                    
+                    switch (blockedDir) {
+                        case NORTH -> {
+                            drawLine(entry, lineConsumer, minX, minY, minZ, maxX, minY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, maxY, minZ, maxX, maxY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, minZ, minX, maxY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, minY, minZ, maxX, maxY, minZ, r, g, b, a);
+                        }
+                        case SOUTH -> {
+                            drawLine(entry, lineConsumer, minX, minY, maxZ, maxX, minY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, maxY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, maxZ, minX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, minY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+                        }
+                        case WEST -> {
+                            drawLine(entry, lineConsumer, minX, minY, minZ, minX, minY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, maxY, minZ, minX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, minZ, minX, maxY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, maxZ, minX, maxY, maxZ, r, g, b, a);
+                        }
+                        case EAST -> {
+                            drawLine(entry, lineConsumer, maxX, minY, minZ, maxX, minY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, maxY, minZ, maxX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, minY, minZ, maxX, maxY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, minY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+                        }
+                        case DOWN -> {
+                            drawLine(entry, lineConsumer, minX, minY, minZ, maxX, minY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, maxZ, maxX, minY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, minY, minZ, minX, minY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, minY, minZ, maxX, minY, maxZ, r, g, b, a);
+                        }
+                        case UP -> {
+                            drawLine(entry, lineConsumer, minX, maxY, minZ, maxX, maxY, minZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, maxY, maxZ, maxX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, minX, maxY, minZ, minX, maxY, maxZ, r, g, b, a);
+                            drawLine(entry, lineConsumer, maxX, maxY, minZ, maxX, maxY, maxZ, r, g, b, a);
+                        }
+                    }
+                }
                 matrices.pop();
             }
         });
+    }
+
+    private static void drawLine(MatrixStack.Entry entry, VertexConsumer vc, float x1, float y1, float z1, float x2, float y2, float z2, int r, int g, int b, int a) {
+        float dx = x2 - x1; float dy = y2 - y1; float dz = z2 - z1;
+        float len = (float) Math.sqrt(dx * dx + dy * dy + dz * dz);
+        dx /= len; dy /= len; dz /= len;
+        vc.vertex(entry.getPositionMatrix(), x1, y1, z1).color(r, g, b, a).normal(entry, dx, dy, dz);
+        vc.vertex(entry.getPositionMatrix(), x2, y2, z2).color(r, g, b, a).normal(entry, dx, dy, dz);
     }
 }

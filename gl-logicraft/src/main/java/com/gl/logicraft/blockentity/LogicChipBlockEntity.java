@@ -15,6 +15,7 @@ import net.minecraft.registry.RegistryWrapper;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.world.World;
+import net.minecraft.network.packet.s2c.play.BlockEntityUpdateS2CPacket;
 
 import java.util.*;
 
@@ -22,16 +23,20 @@ import java.util.*;
  * Block entity for the LogicChipBlock.
  *
  * Stores the circuit editor layout (GuiComponent + Wire lists) and evaluates
- * the circuit graph when inputs change. Results are written to CircuitState.outputs.
+ * the circuit graph when inputs change. Results are written to
+ * CircuitState.outputs.
  */
 public class LogicChipBlockEntity extends BlockEntity {
 
     public static final int MAX_COMPONENTS = 8;
 
     // Fixed node IDs --------------------------------------------------------
-    public static final String NODE_REDST_IN  = "REDST_IN";
+    public static final String NODE_REDST_IN = "REDST_IN";
     public static final String NODE_REDST_OUT = "REDST_OUT";
-    public static final String NODE_IN(int n) { return "IN_" + n; }  // helper – not valid Java, see below
+
+    public static final String NODE_IN(int n) {
+        return "IN_" + n;
+    } // helper – not valid Java, see below
 
     // -----------------------------------------------------------------------
     // State
@@ -41,7 +46,7 @@ public class LogicChipBlockEntity extends BlockEntity {
 
     /** Visual layout — persisted and synced to player GUI. */
     private final List<GuiComponent> guiComponents = new ArrayList<>();
-    private final List<Wire>         wires         = new ArrayList<>();
+    private final List<Wire> wires = new ArrayList<>();
 
     /** Legacy execution-side list (kept for SignalPropagator compat). */
     private final List<LogicComponent> components = new ArrayList<>();
@@ -49,6 +54,9 @@ public class LogicChipBlockEntity extends BlockEntity {
     boolean isPropagating = false;
     private boolean lastOutput = false;
     private boolean lastInputRedstone = false;
+    public Direction lastSignalOrigin = null;
+    public boolean pendingRedstoneInput = false;
+    private final Map<String, LogicComponent.TFlipFlop> tffInstances = new HashMap<>();
 
     // -----------------------------------------------------------------------
     // Constructor
@@ -59,13 +67,36 @@ public class LogicChipBlockEntity extends BlockEntity {
     }
 
     // -----------------------------------------------------------------------
-    // Accessors
+    // Accessors & Sync
     // -----------------------------------------------------------------------
 
-    public CircuitState          getCircuitState()    { return circuitState; }
-    public List<GuiComponent>    getGuiComponents()   { return guiComponents; }
-    public List<Wire>            getWires()           { return wires; }
-    public List<LogicComponent>  getLogicComponents() { return components; }
+    @Override
+    public BlockEntityUpdateS2CPacket toUpdatePacket() {
+        return BlockEntityUpdateS2CPacket.create(this);
+    }
+
+    @Override
+    public NbtCompound toInitialChunkDataNbt(RegistryWrapper.WrapperLookup registries) {
+        NbtCompound nbt = new NbtCompound();
+        this.writeNbt(nbt, registries);
+        return nbt;
+    }
+
+    public CircuitState getCircuitState() {
+        return circuitState;
+    }
+
+    public List<GuiComponent> getGuiComponents() {
+        return guiComponents;
+    }
+
+    public List<Wire> getWires() {
+        return wires;
+    }
+
+    public List<LogicComponent> getLogicComponents() {
+        return components;
+    }
 
     // -----------------------------------------------------------------------
     // Graph evaluation
@@ -77,7 +108,8 @@ public class LogicChipBlockEntity extends BlockEntity {
      * If any circuit output changed, propagates to the world and neighbours.
      */
     public void serverEvaluate() {
-        if (world == null) return;
+        if (world == null)
+            return;
 
         boolean[] outputsBefore = Arrays.copyOf(circuitState.outputs, CircuitState.SIGNAL_COUNT);
 
@@ -85,22 +117,23 @@ public class LogicChipBlockEntity extends BlockEntity {
         Map<String, boolean[]> sigs = new HashMap<>();
 
         // Fixed input nodes
-        sigs.put(NODE_REDST_IN, new boolean[]{circuitState.inputs[0]});
+        circuitState.inputs[0] = pendingRedstoneInput;
+        sigs.put(NODE_REDST_IN, new boolean[] { circuitState.inputs[0] });
         for (int i = 0; i < 4; i++) {
-            sigs.put("IN_" + i, new boolean[]{circuitState.inputs[i + 1]});
+            sigs.put("IN_" + i, new boolean[] { circuitState.inputs[i + 1] });
         }
 
         // Seed constants first
         for (GuiComponent gc : guiComponents) {
             if ("1".equals(gc.type) || "0".equals(gc.type)) {
-                boolean val = evalGate(gc.type, new boolean[0]);
-                sigs.put(gc.id, new boolean[]{val});
+                boolean[] vals = evalGateMulti(gc.id, gc.type, new boolean[0]);
+                sigs.put(gc.id, vals);
             }
         }
 
-        // Settle signals with up to (size+1) passes (handles any topological order)
-        int passes = guiComponents.size() + 1;
-        for (int p = 0; p < passes; p++) {
+        int maxIterations = 20;
+        for (int p = 0; p < maxIterations; p++) {
+            boolean changedInIter = false;
             for (GuiComponent gc : guiComponents) {
                 int inCount = gc.getInputCount();
                 boolean[] gateInputs = new boolean[inCount];
@@ -112,9 +145,15 @@ public class LogicChipBlockEntity extends BlockEntity {
                         }
                     }
                 }
-                boolean result = evalGate(gc.type, gateInputs);
-                sigs.put(gc.id, new boolean[]{result});
+                boolean[] results = evalGateMulti(gc.id, gc.type, gateInputs);
+                boolean[] prev = sigs.get(gc.id);
+                if (prev == null || !Arrays.equals(prev, results)) {
+                    sigs.put(gc.id, results);
+                    changedInIter = true;
+                }
             }
+            if (!changedInIter)
+                break;
         }
 
         // Read output nodes
@@ -140,23 +179,44 @@ public class LogicChipBlockEntity extends BlockEntity {
         if (changed) {
             isPropagating = true;
             try {
-                SignalPropagator.propagate(world, pos, circuitState.outputs);
+                BlockPos originPos = this.lastSignalOrigin != null ? pos.offset(this.lastSignalOrigin) : pos;
+                SignalPropagator.propagate(world, pos, circuitState.outputs, originPos);
             } finally {
                 isPropagating = false;
             }
             markDirty();
+            world.updateListeners(pos, getCachedState(), getCachedState(), net.minecraft.block.Block.NOTIFY_LISTENERS);
         }
     }
 
-    private boolean evalGate(String type, boolean[] inputs) {
+    private boolean[] evalGateMulti(String id, String type, boolean[] inputs) {
+        if ("tff".equalsIgnoreCase(type)) {
+            LogicComponent.TFlipFlop tff = tffInstances.get(id);
+            if (tff == null) {
+                tff = new LogicComponent.TFlipFlop();
+                tffInstances.put(id, tff);
+            }
+            return tff.evaluateMulti(inputs);
+        }
         return switch (type.toLowerCase()) {
-            case "and"  -> { boolean r = true;  for (boolean b : inputs) r &= b; yield r; }
-            case "or"   -> { boolean r = false; for (boolean b : inputs) r |= b; yield r; }
-            case "xor"  -> inputs.length >= 2 && (inputs[0] ^ inputs[1]);
-            case "not"  -> inputs.length > 0 && !inputs[0];
-            case "1"    -> true;
-            case "0"    -> false;
-            default     -> inputs.length > 0 && inputs[0]; // pass
+            case "and" -> {
+                boolean r = true;
+                for (boolean b : inputs)
+                    r &= b;
+                yield new boolean[] { r };
+            }
+            case "or" -> {
+                boolean r = false;
+                for (boolean b : inputs)
+                    r |= b;
+                yield new boolean[] { r };
+            }
+            case "xor" -> new boolean[] { inputs.length >= 2 && (inputs[0] ^ inputs[1]) };
+            case "not" -> new boolean[] { inputs.length > 0 && !inputs[0] };
+            case "split", "pass" -> new boolean[] { inputs.length > 0 && inputs[0], inputs.length > 0 && inputs[0] };
+            case "1" -> new boolean[] { true };
+            case "0" -> new boolean[] { false };
+            default -> new boolean[] { inputs.length > 0 && inputs[0] };
         };
     }
 
@@ -177,15 +237,20 @@ public class LogicChipBlockEntity extends BlockEntity {
     // Incoming neighbour signals
     // -----------------------------------------------------------------------
 
-    public void receiveSignals(boolean[] signals) {
-        if (isPropagating || world == null || world.isClient()) return;
+    public void receiveSignals(boolean[] signals, Direction fromDirection) {
+        if (isPropagating || world == null || world.isClient())
+            return;
+
+        Direction oldOrigin = this.lastSignalOrigin;
+        this.lastSignalOrigin = fromDirection;
 
         // Re-calculate inputs 1-4 by ORing all neighbors
         boolean[] nextInputs = new boolean[CircuitState.SIGNAL_COUNT];
         System.arraycopy(circuitState.inputs, 0, nextInputs, 0, CircuitState.SIGNAL_COUNT);
 
         // Reset inter-chip inputs before merging
-        for (int i = 1; i < 5; i++) nextInputs[i] = false;
+        for (int i = 1; i < 5; i++)
+            nextInputs[i] = false;
 
         for (Direction dir : Direction.values()) {
             if (world.getBlockEntity(pos.offset(dir)) instanceof LogicChipBlockEntity neighbor) {
@@ -196,6 +261,15 @@ public class LogicChipBlockEntity extends BlockEntity {
             }
         }
 
+        boolean anyInterChip = false;
+        for (int i = 1; i < 5; i++) {
+            if (nextInputs[i])
+                anyInterChip = true;
+        }
+        if (!anyInterChip) {
+            this.lastSignalOrigin = null;
+        }
+
         boolean changed = false;
         for (int i = 1; i < 5; i++) {
             if (circuitState.inputs[i] != nextInputs[i]) {
@@ -203,7 +277,15 @@ public class LogicChipBlockEntity extends BlockEntity {
                 changed = true;
             }
         }
-        if (changed) serverEvaluate();
+
+        boolean originChanged = (oldOrigin != this.lastSignalOrigin);
+
+        if (changed) {
+            serverEvaluate();
+        } else if (originChanged) {
+            markDirty();
+            world.updateListeners(pos, getCachedState(), getCachedState(), net.minecraft.block.Block.NOTIFY_LISTENERS);
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -214,16 +296,29 @@ public class LogicChipBlockEntity extends BlockEntity {
         NbtCompound nbt = new NbtCompound();
 
         NbtList gcList = new NbtList();
-        for (GuiComponent gc : guiComponents) gcList.add(gc.toNbt());
+        for (GuiComponent gc : guiComponents)
+            gcList.add(gc.toNbt());
         nbt.put("GuiComponents", gcList);
 
         NbtList wList = new NbtList();
-        for (Wire w : wires) wList.add(w.toNbt());
+        for (Wire w : wires)
+            wList.add(w.toNbt());
         nbt.put("Wires", wList);
 
         byte[] ins = new byte[CircuitState.SIGNAL_COUNT];
-        for (int i = 0; i < CircuitState.SIGNAL_COUNT; i++) ins[i] = (byte)(circuitState.inputs[i] ? 1 : 0);
+        for (int i = 0; i < CircuitState.SIGNAL_COUNT; i++)
+            ins[i] = (byte) (circuitState.inputs[i] ? 1 : 0);
         nbt.putByteArray("CircuitInputs", ins);
+
+        // Include TFF states
+        NbtCompound tffNbt = new NbtCompound();
+        for (Map.Entry<String, LogicComponent.TFlipFlop> e : tffInstances.entrySet()) {
+            NbtCompound t = new NbtCompound();
+            t.putBoolean("state", e.getValue().state);
+            t.putBoolean("lastClk", e.getValue().lastClk);
+            tffNbt.put(e.getKey(), t);
+        }
+        nbt.put("TffStates", tffNbt);
 
         return nbt;
     }
@@ -241,6 +336,26 @@ public class LogicChipBlockEntity extends BlockEntity {
         for (int i = 0; i < wList.size(); i++) {
             wires.add(Wire.fromNbt(wList.getCompound(i)));
         }
+
+        // Re-initialize TFF instances
+        tffInstances.clear();
+        for (GuiComponent gc : guiComponents) {
+            if ("TFF".equalsIgnoreCase(gc.type)) {
+                tffInstances.put(gc.id, new LogicComponent.TFlipFlop());
+            }
+        }
+
+        // Restore states if present
+        if (nbt.contains("TffStates")) {
+            NbtCompound tffNbt = nbt.getCompound("TffStates");
+            for (String id : tffNbt.getKeys()) {
+                LogicComponent.TFlipFlop tff = tffInstances.get(id);
+                if (tff != null) {
+                    tff.state = tffNbt.getCompound(id).getBoolean("state");
+                    tff.lastClk = tffNbt.getCompound(id).getBoolean("lastClk");
+                }
+            }
+        }
     }
 
     // -----------------------------------------------------------------------
@@ -252,6 +367,12 @@ public class LogicChipBlockEntity extends BlockEntity {
         super.writeNbt(nbt, registries);
         nbt.put("CircuitState", circuitState.toNbt());
         nbt.put("GuiData", serializeGuiData());
+        if (lastSignalOrigin != null) {
+            nbt.putInt("LastSignalOrigin", lastSignalOrigin.getId());
+        } else {
+            nbt.putInt("LastSignalOrigin", -1);
+        }
+        nbt.putBoolean("PendingRedstoneInput", pendingRedstoneInput);
     }
 
     @Override
@@ -263,21 +384,36 @@ public class LogicChipBlockEntity extends BlockEntity {
         if (nbt.contains("GuiData")) {
             deserializeGuiData(nbt.getCompound("GuiData"));
         }
+        if (nbt.contains("LastSignalOrigin")) {
+            int dirId = nbt.getInt("LastSignalOrigin");
+            this.lastSignalOrigin = dirId >= 0 ? Direction.byId(dirId) : null;
+        }
+        if (nbt.contains("PendingRedstoneInput")) {
+            this.pendingRedstoneInput = nbt.getBoolean("PendingRedstoneInput");
+        }
     }
 
     public static void tick(World world, BlockPos pos, BlockState state, LogicChipBlockEntity be) {
-        if (world.isClient) return;
+        if (world.isClient)
+            return;
 
-        // Poll host block redstone every tick to catch removals neighborUpdate might miss
+        // Poll host block redstone every tick to catch removals neighborUpdate might
+        // miss
         Direction facing = state.get(com.gl.logicraft.block.LogicChipBlock.FACING);
         BlockPos hostPos = pos.offset(facing.getOpposite());
-        int power = world.getReceivedRedstonePower(hostPos);
+        Direction chipDir = state.get(com.gl.logicraft.block.LogicChipBlock.FACING);
+        int power = 0;
+        for (Direction dir : Direction.values()) {
+            if (dir == chipDir)
+                continue;
+            power = Math.max(power, world.getEmittedRedstonePower(hostPos.offset(dir), dir));
+        }
         boolean currentInput = power > 0;
 
         if (currentInput != be.lastInputRedstone) {
             be.lastInputRedstone = currentInput;
-            be.getCircuitState().inputs[0] = currentInput;
-            be.serverEvaluate();
+            be.pendingRedstoneInput = currentInput;
+            world.scheduleBlockTick(pos, state.getBlock(), 1);
         }
     }
 }

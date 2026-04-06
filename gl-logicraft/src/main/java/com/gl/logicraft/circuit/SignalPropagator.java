@@ -22,17 +22,19 @@ public class SignalPropagator {
      * Check all 6 neighbours of {@code pos}. If any of them contains a
      * {@link LogicChipBlockEntity}, call {@code receiveSignals(outputs)} on it.
      *
-     * @param world   the server-side world
-     * @param pos     position of the chip that just finished evaluating
-     * @param outputs the chip's current output array (length == CircuitState.SIGNAL_COUNT)
+     * @param world     the server-side world
+     * @param pos       position of the chip that just finished evaluating
+     * @param outputs   the chip's current output array (length == CircuitState.SIGNAL_COUNT)
+     * @param originPos origin of the signal propagation to prevent loopbacks
      */
-    public static void propagate(World world, BlockPos pos, boolean[] outputs) {
+    public static void propagate(World world, BlockPos pos, boolean[] outputs, BlockPos originPos) {
         if (world.isClient()) return; // server-side only
 
         for (Direction dir : Direction.values()) {
             BlockPos neighbourPos = pos.offset(dir);
+            if (neighbourPos.equals(originPos)) continue; // skip origin — no feedback loop
             if (world.getBlockEntity(neighbourPos) instanceof LogicChipBlockEntity neighbour) {
-                neighbour.receiveSignals(outputs);
+                neighbour.receiveSignals(outputs, dir.getOpposite());
             }
         }
     }

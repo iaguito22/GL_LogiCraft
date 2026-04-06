@@ -35,7 +35,7 @@ import org.jetbrains.annotations.Nullable;
  * - Emits getWeakRedstonePower from CircuitState.outputs[0].
  *
  * Interaction:
- *  - Right-click with an item tagged `gllogicraft:wrench` → opens GUI.
+ * - Right-click with an item tagged `gllogicraft:wrench` → opens GUI.
  */
 public class LogicChipBlock extends BlockWithEntity {
 
@@ -97,10 +97,7 @@ public class LogicChipBlock extends BlockWithEntity {
     @Override
     protected void scheduledTick(BlockState state, net.minecraft.server.world.ServerWorld world, BlockPos pos,
             net.minecraft.util.math.random.Random random) {
-        BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
-        int power = world.getReceivedRedstonePower(hostPos);
         if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity chip) {
-            chip.getCircuitState().inputs[0] = power > 0;
             chip.serverEvaluate();
         }
     }
@@ -199,9 +196,15 @@ public class LogicChipBlock extends BlockWithEntity {
 
         if (world.getBlockEntity(pos) instanceof LogicChipBlockEntity be) {
             BlockPos hostPos = pos.offset(state.get(FACING).getOpposite());
-            int power = world.getReceivedRedstonePower(hostPos);
-            be.getCircuitState().inputs[0] = power > 0;
-            be.serverEvaluate();
+            Direction chipDir = state.get(FACING);
+            int power = 0;
+            for (Direction dir : Direction.values()) {
+                if (dir == chipDir)
+                    continue;
+                power = Math.max(power, world.getEmittedRedstonePower(hostPos.offset(dir), dir));
+            }
+            be.pendingRedstoneInput = power > 0;
+            world.scheduleBlockTick(pos, this, 1);
         }
     }
 

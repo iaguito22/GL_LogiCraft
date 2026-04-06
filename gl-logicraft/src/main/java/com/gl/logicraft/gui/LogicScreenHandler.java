@@ -17,6 +17,7 @@ import net.minecraft.util.math.BlockPos;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Screen handler for the circuit editor GUI.
@@ -35,6 +36,7 @@ public class LogicScreenHandler extends ScreenHandler {
     private final List<GuiComponent> guiComponents = new ArrayList<>();
     private final List<Wire>         wires         = new ArrayList<>();
     public final boolean[]           startingInputs = new boolean[5];
+    private NbtCompound guiNbt; // Raw data for extra fields like TFF state
 
     // -----------------------------------------------------------------------
     // Server-side constructor (called by WrenchItem.useOnBlock createMenu)
@@ -72,6 +74,7 @@ public class LogicScreenHandler extends ScreenHandler {
                     startingInputs[i] = (ins[i] != 0);
                 }
             }
+            this.guiNbt = gui;
         }
 
     }
@@ -83,12 +86,13 @@ public class LogicScreenHandler extends ScreenHandler {
     public BlockPos getChipPos()             { return chipPos; }
     public List<GuiComponent> getGuiComponents() { return guiComponents; }
     public List<Wire>         getWires()         { return wires; }
+    public NbtCompound        getGuiNbt()        { return guiNbt; }
 
     // -----------------------------------------------------------------------
     // Called from LogicScreen when player closes — sends data to server
     // -----------------------------------------------------------------------
 
-    public void saveToServer() {
+    public void saveToServer(Map<String, Boolean> tffStates, Map<String, Boolean> tffLastClks) {
         NbtCompound guiData = new NbtCompound();
 
         NbtList gcList = new NbtList();
@@ -98,6 +102,16 @@ public class LogicScreenHandler extends ScreenHandler {
         NbtList wList = new NbtList();
         for (Wire w : wires) wList.add(w.toNbt());
         guiData.put("Wires", wList);
+
+        // Serialize TFF states
+        NbtCompound tffNbt = new NbtCompound();
+        for (Map.Entry<String, Boolean> e : tffStates.entrySet()) {
+            NbtCompound t = new NbtCompound();
+            t.putBoolean("state", e.getValue());
+            t.putBoolean("lastClk", tffLastClks.getOrDefault(e.getKey(), false));
+            tffNbt.put(e.getKey(), t);
+        }
+        guiData.put("TffStates", tffNbt);
 
         net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking
                 .send(new SaveCircuitPayload(chipPos, guiData));

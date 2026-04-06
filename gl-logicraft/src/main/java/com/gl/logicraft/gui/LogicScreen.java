@@ -5,6 +5,7 @@ import com.gl.logicraft.circuit.Wire;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.entity.player.PlayerInventory;
+import net.minecraft.nbt.NbtCompound;
 import net.minecraft.text.Text;
 import net.minecraft.util.Formatting;
 
@@ -53,7 +54,8 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
             { "OR", "or" },
             { "NOT", "not" },
             { "XOR", "XOR" },
-            { "PASS", "pass" },
+            { "TFF", "TFF" },
+            { "SPLIT", "SPLIT" },
             { "1", "1" },
             { "0", "0" }
     };
@@ -97,6 +99,11 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
     record PortHit(String componentId, int portIndex, boolean isOutput) {
     }
 
+    private boolean isGlobalStable = true;
+    private final java.util.Set<Wire> oscillatingWires = new java.util.HashSet<>();
+    private final Map<String, Boolean> tffLastClk = new HashMap<>();
+    private final Map<String, Boolean> tffState = new HashMap<>();
+
     // -----------------------------------------------------------------------
     // Constructor
     // -----------------------------------------------------------------------
@@ -105,6 +112,16 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         super(handler, inv, title);
         this.currentInputs = new boolean[5];
         System.arraycopy(handler.startingInputs, 0, this.currentInputs, 0, 5);
+        
+        // Seed TFF states from server data
+        if (handler.getGuiNbt() != null && handler.getGuiNbt().contains("TffStates")) {
+            NbtCompound tffNbt = handler.getGuiNbt().getCompound("TffStates");
+            for (String id : tffNbt.getKeys()) {
+                NbtCompound t = tffNbt.getCompound(id);
+                tffState.put(id, t.getBoolean("state"));
+                tffLastClk.put(id, t.getBoolean("lastClk"));
+            }
+        }
     }
 
     @Override
@@ -126,7 +143,7 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         if (type == null)
             return 1;
         return switch (type.toLowerCase()) {
-            case "and", "or", "xor" -> 2;
+            case "and", "or", "xor", "split" -> 2;
             default -> 1;
         };
     }
@@ -149,51 +166,81 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         // Seed constants first
         for (GuiComponent gc : handler.getGuiComponents()) {
             if ("1".equals(gc.type) || "0".equals(gc.type)) {
-                boolean val = evalGate(gc.type, new boolean[0]);
-                signals.put(new PortRef(gc.id, 0, true), val);
+                boolean[] results = evalGateMulti(gc.type, new boolean[0]);
+                for (int i = 0; i < results.length; i++) {
+                    signals.put(new PortRef(gc.id, i, true), results[i]);
+                }
             }
         }
 
-        int passes = handler.getGuiComponents().size() + 1;
-        boolean stabilized = false;
+        int maxIterations = 20;
+        oscillatingWires.clear();
 
-        for (int iter = 0; iter < 20; iter++) {
+        for (int iter = 0; iter < maxIterations; iter++) {
             boolean changedInIter = false;
+            java.util.Set<PortRef> iterChanges = new java.util.HashSet<>();
 
             for (GuiComponent gc : handler.getGuiComponents()) {
-                int inCount = gc.getInputCount();
-                boolean[] gateInputs = new boolean[inCount];
-
-                for (Wire w : handler.getWires()) {
-                    if (w.toId.equals(gc.id)) {
-                        PortRef srcRef = new PortRef(w.fromId, w.fromPort, true);
-                        if (signals.getOrDefault(srcRef, false)) {
-                            gateInputs[w.toPort] = true;
+                boolean[] results;
+                if ("tff".equalsIgnoreCase(gc.type)) {
+                    boolean clk = false;
+                    for (Wire w : handler.getWires()) {
+                        if (w.toId.equals(gc.id) && w.toPort == 0) {
+                            clk = signals.getOrDefault(new PortRef(w.fromId, w.fromPort, true), false);
                         }
                     }
+                    boolean last = tffLastClk.getOrDefault(gc.id, false);
+                    boolean st = tffState.getOrDefault(gc.id, false);
+                    if (clk && !last) { 
+                        st = !st; // Rising edge trigger
+                    }
+                    tffLastClk.put(gc.id, clk);
+                    tffState.put(gc.id, st);
+                    results = new boolean[]{st};
+                } else {
+                    int inCount = gc.getInputCount();
+                    boolean[] gateInputs = new boolean[inCount];
+                    for (Wire w : handler.getWires()) {
+                        if (w.toId.equals(gc.id)) {
+                            PortRef srcRef = new PortRef(w.fromId, w.fromPort, true);
+                            if (signals.getOrDefault(srcRef, false)) {
+                                gateInputs[w.toPort] = true;
+                            }
+                        }
+                    }
+                    results = evalGateMulti(gc.type, gateInputs);
                 }
 
-                boolean result = evalGate(gc.type, gateInputs);
-                PortRef outRef = new PortRef(gc.id, 0, true);
-                if (signals.getOrDefault(outRef, false) != result) {
-                    signals.put(outRef, result);
-                    changedInIter = true;
+                for (int i = 0; i < results.length; i++) {
+                    PortRef outRef = new PortRef(gc.id, i, true);
+                    if (signals.getOrDefault(outRef, false) != results[i]) {
+                        signals.put(outRef, results[i]);
+                        changedInIter = true;
+                        if (iter >= maxIterations - 2) iterChanges.add(outRef);
+                    }
                 }
             }
 
-            if (!changedInIter && iter >= passes - 1) {
-                stabilized = true;
-                break; // stable
+            if (!changedInIter) {
+                isGlobalStable = true;
+                break;
+            }
+            if (iter >= maxIterations - 1) {
+                isGlobalStable = false;
+                for (Wire w : handler.getWires()) {
+                    PortRef srcRef = new PortRef(w.fromId, w.fromPort, true);
+                    if (iterChanges.contains(srcRef)) {
+                        oscillatingWires.add(w);
+                    }
+                }
             }
         }
 
-        // Update wire signals + invalid looping (cc2200 for remaining/unstable)
+        // Update wire signals
         for (Wire w : handler.getWires()) {
             PortRef srcRef = new PortRef(w.fromId, w.fromPort, true);
             w.signal = signals.getOrDefault(srcRef, false);
-            // We use 'stabilized' below
         }
-        isGlobalStable = stabilized;
 
         // Write outputs
         for (int i = 0; i < 5; i++) {
@@ -209,25 +256,26 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         }
     }
 
-    private boolean evalGate(String type, boolean[] inputs) {
+    private boolean[] evalGateMulti(String type, boolean[] inputs) {
         return switch (type.toLowerCase()) {
             case "and" -> {
                 boolean r = true;
                 for (boolean b : inputs)
                     r &= b;
-                yield r;
+                yield new boolean[] { r };
             }
             case "or" -> {
                 boolean r = false;
                 for (boolean b : inputs)
                     r |= b;
-                yield r;
+                yield new boolean[] { r };
             }
-            case "xor" -> inputs.length >= 2 && (inputs[0] ^ inputs[1]);
-            case "not" -> inputs.length > 0 && !inputs[0];
-            case "1" -> true;
-            case "0" -> false;
-            default -> inputs.length > 0 && inputs[0]; // pass
+            case "xor" -> new boolean[] { inputs.length >= 2 && (inputs[0] ^ inputs[1]) };
+            case "not" -> new boolean[] { inputs.length > 0 && !inputs[0] };
+            case "split" -> new boolean[] { inputs.length > 0 && inputs[0], inputs.length > 0 && inputs[0] };
+            case "1" -> new boolean[] { true };
+            case "0" -> new boolean[] { false };
+            default -> new boolean[] { inputs.length > 0 && inputs[0] }; // pass
         };
     }
 
@@ -317,12 +365,17 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
 
         // Don't draw ports during drag for simplicity, or draw them dimmed
         if (!transparent) {
+            int outCount = getEffectiveOutputCount(gc.type);
+            for (int i = 0; i < outCount; i++) {
+                int portY = py + (i + 1) * pixH / (outCount + 1);
+                drawPort(ctx, px + CELL_SIZE, portY, getPortColor(gc.id, i, true));
+            }
+            // Input ports
             int inCount = getEffectiveInputCount(gc.type);
             for (int i = 0; i < inCount; i++) {
                 int portY = py + (i + 1) * pixH / (inCount + 1);
                 drawPort(ctx, px, portY, getPortColor(gc.id, i, false));
             }
-            drawPort(ctx, px + CELL_SIZE, py + pixH / 2, getPortColor(gc.id, 0, true));
         }
     }
 
@@ -353,8 +406,11 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
                 { "OR", "Output ON if ANY input is ON" },
                 { "NOT", "Inverts the input signal" },
                 { "XOR", "Output ON if inputs are DIFFERENT" },
-                { "PASS", "Passes the signal through unchanged." },
-                { "", "Useful to split one output into multiple inputs." },
+                { "TFF", "Toggle Flip-Flop. Each time input goes from" },
+                { "", "OFF to ON, output toggles. Use to convert" },
+                { "", "a button into a toggle switch." },
+                { "SPLIT", "Copies input to two outputs." },
+                { "", "Use to split one signal into multiple paths." },
                 { "1", "Always outputs ON (1)" },
                 { "0", "Always outputs OFF (0)" }
         };
@@ -584,18 +640,12 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
                 continue;
             }
             int col = w.signal ? COL_WIRE_ON : COL_WIRE_OFF;
-            if (isUnstableAndLooped()) {
-                col = COL_WIRE_ERR; // simplified anti-loop representation: if overall unstable, error wires
+            if (!isGlobalStable && oscillatingWires.contains(w)) {
+                col = COL_WIRE_ERR;
             }
             drawWireLine(ctx, from[0], from[1], to[0], to[1], col);
         }
     }
-
-    private boolean isUnstableAndLooped() {
-        return !isGlobalStable;
-    }
-
-    private boolean isGlobalStable = true;
 
     private void drawPendingWire(DrawContext ctx) {
         if (pendingWire == null)
@@ -652,10 +702,13 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
             int py = gridOriginY + gc.gridY * CELL_SIZE;
             int pixH = getComponentHeight(gc.type) * CELL_SIZE;
 
-            int outPx = px + CELL_SIZE;
-            int outPy = py + pixH / 2;
-            if (Math.abs(mouseX - outPx) <= 5 && Math.abs(mouseY - outPy) <= 5) {
-                return new PortHit(gc.id, 0, true);
+            int outCount = getEffectiveOutputCount(gc.type);
+            for (int i = 0; i < outCount; i++) {
+                int outPx = px + CELL_SIZE;
+                int outPy = py + (i + 1) * pixH / (outCount + 1);
+                if (Math.abs(mouseX - outPx) <= 5 && Math.abs(mouseY - outPy) <= 5) {
+                    return new PortHit(gc.id, i, true);
+                }
             }
 
             int inCount = getEffectiveInputCount(gc.type);
@@ -669,14 +722,12 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
         return null;
     }
 
-    private int getEffectiveInputCount(String type) {
+    private int getEffectiveOutputCount(String type) {
         if (type == null)
             return 1;
-        return switch (type.toLowerCase()) {
-            case "and", "or", "xor" -> 2;
-            case "1", "0" -> 0;
-            default -> 1;
-        };
+        if ("split".equalsIgnoreCase(type))
+            return 2;
+        return 1;
     }
 
     private int[] getPortPixel(String id, int portIndex, boolean isOutput) {
@@ -698,15 +749,26 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
                 int px = gridOriginX + gc.gridX * CELL_SIZE;
                 int py = gridOriginY + gc.gridY * CELL_SIZE;
                 int pixH = getComponentHeight(gc.type) * CELL_SIZE;
+                int outCount = getEffectiveOutputCount(gc.type);
                 if (isOutput) {
-                    return new int[] { px + CELL_SIZE, py + pixH / 2 };
+                    return new int[] { px + CELL_SIZE, py + (portIndex + 1) * pixH / (outCount + 1) };
                 } else {
-                    int inCount = gc.getInputCount();
+                    int inCount = getEffectiveInputCount(gc.type);
                     return new int[] { px, py + (portIndex + 1) * pixH / (inCount + 1) };
                 }
             }
         }
         return null;
+    }
+
+    private int getEffectiveInputCount(String type) {
+        if (type == null)
+            return 1;
+        return switch (type.toLowerCase()) {
+            case "and", "or", "xor" -> 2;
+            case "1", "0" -> 0;
+            default -> 1;
+        };
     }
 
     // -----------------------------------------------------------------------
@@ -996,7 +1058,7 @@ public class LogicScreen extends HandledScreen<LogicScreenHandler> {
 
     @Override
     public void close() {
-        handler.saveToServer();
+        handler.saveToServer(tffState, tffLastClk);
         super.close();
     }
 
